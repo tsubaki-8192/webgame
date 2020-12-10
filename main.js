@@ -1,21 +1,47 @@
 'use strict';
 
+const SCREEN_WIDTH = 640;
+const SCREEN_HEIGHT = 480;
+
 let canvas;
 let context;
 let audiocontext;
 
+let gamepads = {};
 let keys = {};
 
-let mikanX, mikanY;
+let playerX, playerY;
+let num_present;
 
-let Asset = {}
+const TILE_SIZE = 32;
+const NUM_TILE_X = SCREEN_WIDTH / TILE_SIZE;
+const NUM_TILE_Y = SCREEN_HEIGHT / TILE_SIZE;
+let map = [
+	0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0,
+	1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+];
 
+
+let Asset = {};
 Asset.assets = [
 	{ type: 'image', name: 'back', src: 'assets/back.png' },
-	{ type: 'image', name: 'box', src: 'assets/box.png' },
-	{ type: 'sound', name: 'main', src: 'assets/main.mp3' },
+	{ type: 'image', name: 'player', src: 'assets/player.png' },
+	//{ type: 'sound', name: 'main', src: 'assets/main.mp3' },
 	{ type: 'sound', name: 'shot', src: 'assets/shot.mp3' },
-	{ type: 'sound', name: 'fanfare', src: 'assets/fanfare.mp3' }
+	//{ type: 'sound', name: 'fanfare', src: 'assets/fanfare.mp3' }
 ];
 
 Asset.images = {};
@@ -73,9 +99,18 @@ function playSound(buffer) {
 	source.start(0);
 }
 
+function gamepadHandler(event, connecting)
+{
+	 let gamepad = event.gamepad;
 
-const SCREEN_WIDTH = 320;
-const SCREEN_HEIGHT = 240;
+	 if (connecting) {
+		 console.log("Pad %d connected", gamepad.index);
+		 gamepads[gamepad.index] = gamepad;
+	 }
+	 else {
+		 delete gamepads[gamepad.index];
+	 }
+}
 
 window.addEventListener('load', init);
 const eventName = typeof document.ontouchend !== 'undefined' ? 'touchend' : 'mouseup';
@@ -86,7 +121,7 @@ function initAudioContext(){
 }
 
 window.addEventListener('keydown', function(event) {
-	if (event.defaultPrevented) {
+	if (event.defaultPrevented || Object.keys(gamepads).length > 0) {
 		return;
 	}
 
@@ -115,8 +150,11 @@ window.addEventListener('keydown', function(event) {
 	event.preventDefault();
 }, true);
 
+window.addEventListener("gamepadconnected", function(e) { gamepadHandler(e, true); }, false);
+window.addEventListener("gamepaddisconnected", function(e) { gamepadHandler(e, false); }, false);
+
 window.addEventListener('keyup', function(event) {
-	if (event.defaultPrevented) {
+	if (event.defaultPrevented || Object.keys(gamepads).length > 0) {
 		return;
 	}
 
@@ -143,6 +181,7 @@ window.addEventListener('keyup', function(event) {
 
 		case "KeyZ":
 			playSound(Asset.sounds['shot']);
+			break;
 	}
 
 	event.preventDefault();
@@ -163,8 +202,8 @@ function init() {
 		alert('Web Audio API is not supported in this browser');
 	}
 
-	mikanX = 0;
-	mikanY = 10;
+	playerX = 0;
+	playerY = 10;
 
 	Asset.loadAssets(function() {
 		requestAnimationFrame(update);
@@ -175,20 +214,31 @@ function init() {
 function update() {
 	requestAnimationFrame(update);
 
-	if (keys["Up"]) {
-		mikanY -= 2;
-	}
-	if (keys["Down"]) {
-		mikanY += 2;
-	}
-	if (keys["Left"]) {
-		mikanX -= 2;
-	}
-	if (keys["Right"]) {
-		mikanX += 2;
+	if (Object.keys(gamepads).length > 0) {
+		checkGamepadInput();
 	}
 
-	if (mikanX == 100) {
+	if (keys["Up"]) {
+		playerY -= 2;
+	}
+	if (keys["Down"]) {
+		playerY += 2;
+	}
+	if (keys["Left"]) {
+		playerX -= 2;
+	}
+	if (keys["Right"]) {
+		playerX += 2;
+	}
+
+	let mapx = Math.floor((playerX+TILE_SIZE/2)/TILE_SIZE);
+	let mapy = Math.floor((playerY+TILE_SIZE/2)/TILE_SIZE);
+	if (map[mapy*NUM_TILE_X+mapx] == 2) {
+		map[mapy*NUM_TILE_X+mapx] = 0;
+		num_present--;
+	}
+
+	if (playerX == 100) {
 		playSound(Asset.sounds['fanfare']);
 	}
 	render();
@@ -198,5 +248,31 @@ function render() {
 	context.clearRect(0, 0, canvas.width, canvas.height);
 
 	context.drawImage(Asset.images['back'], 0, 0);
-	context.drawImage(Asset.images['box'], mikanX, mikanY);
+	context.drawImage(Asset.images['player'], playerX, playerY, TILE_SIZE, TILE_SIZE);
+
+	num_present = 0;
+	for (let y=0; y<NUM_TILE_Y; y++) {
+		for (let x=0; x<NUM_TILE_X; x++) {
+			if (map[y*NUM_TILE_X+x] == 1) {
+				context.fillStyle = "rgb(255, 0, 255)";
+				context.fillRect(x*TILE_SIZE, y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+			}
+			if (map[y*NUM_TILE_X+x] == 2) {
+				num_present++;
+				context.fillStyle = "rgb(0, 255, 255)";
+				context.fillRect(x*TILE_SIZE, y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+			}
+		}
+	}
+	document.getElementById("present_counter").innerHTML = "現在のプレゼントは" + num_present + "個";
+}
+
+function checkGamepadInput() {
+	let pads = navigator.getGamepads ? navigator.getGamepads() :
+	(navigator.webkitGetGamepads ? navigator.webkitGetGamepads : []);
+	
+	keys["Up"] = (pads[0].axes[1] < -0.25);
+	keys["Down"] = (pads[0].axes[1] > 0.25);
+	keys["Left"] = (pads[0].axes[0] < -0.25);
+	keys["Right"] = (pads[0].axes[0] > 0.25);
 }
