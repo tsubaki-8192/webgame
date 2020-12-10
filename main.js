@@ -39,9 +39,8 @@ let Asset = {};
 Asset.assets = [
 	{ type: 'image', name: 'back', src: 'assets/back.png' },
 	{ type: 'image', name: 'player', src: 'assets/player.png' },
-	//{ type: 'sound', name: 'main', src: 'assets/main.mp3' },
-	{ type: 'sound', name: 'shot', src: 'assets/shot.mp3' },
-	//{ type: 'sound', name: 'fanfare', src: 'assets/fanfare.mp3' }
+	{ type: 'sound', name: 'get', src: 'assets/get.mp3' },
+	{ type: 'sound', name: 'fanfare', src: 'assets/fanfare.mp3' }
 ];
 
 Asset.images = {};
@@ -207,7 +206,6 @@ function init() {
 
 	Asset.loadAssets(function() {
 		requestAnimationFrame(update);
-		playSound(Asset.sounds['main']);
 	});
 }
 
@@ -236,11 +234,16 @@ function update() {
 	if (map[mapy*NUM_TILE_X+mapx] == 2) {
 		map[mapy*NUM_TILE_X+mapx] = 0;
 		num_present--;
+
+		if (num_present == 0) {
+			playSound(Asset.sounds['fanfare']);
+		}
+		else {
+			playSound(Asset.sounds['get']);
+		}
 	}
 
-	if (playerX == 100) {
-		playSound(Asset.sounds['fanfare']);
-	}
+	
 	render();
 }
 
