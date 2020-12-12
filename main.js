@@ -13,6 +13,14 @@ class Vec2 {
 	add(v) {
 		return new Vec2(this.x+v.x, this.y+v.y);
 	}
+
+	multiply(a) {
+		return new Vec2(this.x*a, this.y*a);
+	}
+
+	dot(v) {
+		return new Vec2(this.x*v.x, this.y*v.y);
+	}
 }
 
 const SCREEN_WIDTH = 640;
@@ -48,7 +56,7 @@ let map = [
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0,
-	1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0,
+	1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
@@ -241,12 +249,6 @@ function update() {
 	}
 
 	pMove.x = pMove.y = 0;
-	if (keys["Up"] > 0) {
-		pMove.y -= 2;
-	}
-	if (keys["Down"] > 0) {
-		pMove.y += 2;
-	}
 	if (keys["Left"] > 0) {
 		pMove.x -= 2;
 	}
@@ -254,48 +256,96 @@ function update() {
 		pMove.x += 2;
 	}
 	if (keys["Jump"] == 1 && !pjumped) {
+		pAccel.y = -JUMP_ACCEL;
 		pjumped = true;
-		pAccel.y = -JUMP_ACCEL; 
 	}
 	pAccel.y += GRAVITY;
 	pMove = pMove.add(pAccel);
 	
-	if (Math.abs(pMove.x) > 5) { pMove.x = 5*Math.sign(pMove.x);}
-	if (Math.abs(pMove.y) > 5) { pMove.y = 5*Math.sign(pMove.y);}
+	if (Math.abs(pMove.x) > 5) { pMove.x = 5*Math.sign(pMove.x); }
+	if (Math.abs(pMove.y) > 5) { pMove.y = 5*Math.sign(pMove.y); }
 
-	let mapx = Math.floor((pPos.x + (pMove.x > 0 ? TILE_SIZE/2 : (pMove.x < 0 ? -TILE_SIZE/2 : 0)) +TILE_SIZE/2)/TILE_SIZE);
-	let mapy = Math.floor((pPos.y + (pMove.y > 0 ? TILE_SIZE/2 : (pMove.y < 0 ? -TILE_SIZE/2 : 0)) +TILE_SIZE/2)/TILE_SIZE);
-	if (map[mapy*NUM_TILE_X+mapx] == 2) {
-		map[mapy*NUM_TILE_X+mapx] = 0;
-		num_present--;
+	let check = 0, count = 0;
+	let point = new Vec2(0, 0);
 
-		if (num_present == 0) {
-			playSound(Asset.sounds['fanfare']);
+	for (let i = 0; i < 4; i++) {
+		point.x = pPos.x + pMove.x + (i%2==1?TILE_SIZE-1:0);
+		point.y = pPos.y + pMove.y + (i>=2?TILE_SIZE-1:0);
+		switch(pointInTile(point)) {
+			case 1:
+				check |= (0x1<<i);
+				count++;
+				break;
+			case 2:
+				getPresent(point);
+				break;
+		}
+	}
+
+	if (count >= 2) {
+		if ((check & 0x3) == 0x3) { // (0x1 | 0x2)
+			pMove.y = Math.floor((pPos.y+pMove.y) / TILE_SIZE + 1)*TILE_SIZE - pPos.y;
+			if (pAccel.y < 0) pAccel.y = 0.5;
+		}
+		if ((check & 0xC) == 0xC) { // (0x4 | 0x8)
+			pMove.y = Math.floor((pPos.y+pMove.y) / TILE_SIZE)*TILE_SIZE - pPos.y;
+			pjumped = false;
+			if (pAccel.y > 0) pAccel.y = 0;
+		}
+		if ((check & 0x5) == 0x5) { // (0x1 | 0x4)
+			pMove.x = Math.floor((pPos.x+pMove.x) / TILE_SIZE + 1)*TILE_SIZE - pPos.x;
+		}
+		if ((check & 0xA) == 0xA) { // (0x2 | 0x8)
+			pMove.x = Math.floor((pPos.x+pMove.x) / TILE_SIZE)*TILE_SIZE - pPos.x;
+		}
+	}
+	else if (count == 1) {
+		point.x = pPos.x + ((check&0xA) != 0?(TILE_SIZE-1):0);
+		point.y = pPos.y + pMove.y + ((check&0xC) != 0?(TILE_SIZE-1):0);
+		if (pointInTile(point)==1) {
+			pMove.y = Math.floor((pPos.y+pMove.y) / TILE_SIZE + ((check&0x3) != 0?1:0))*TILE_SIZE - pPos.y;
+			if ((check&0x3) == 0) { 	
+				pjumped = false; 
+				if (pAccel.y > 0) pAccel.y = 0;
+			}
+			else {
+				if (pAccel.y < 0) pAccel.y = 0.5;
+			}
 		}
 		else {
-			playSound(Asset.sounds['get']);
+				pMove.x = Math.floor((pPos.x+pMove.x) / TILE_SIZE + ((check&0x5) != 0?1:0))*TILE_SIZE - pPos.x;
 		}
 	}
-	if (map[mapy*NUM_TILE_X+mapx] == 1) {
-		pMove.y = pAccel.y = 0;
-		mapy = Math.floor((pPos.y + (pMove.y > 0 ? TILE_SIZE/2 : (pMove.y < 0 ? -TILE_SIZE/2 : 0)) +TILE_SIZE/2)/TILE_SIZE);
-		pjumped = false;
-		if (map[mapy*NUM_TILE_X+mapx] == 1) {
-			pMove.x = pAccel.x  = 0;
-			mapx = Math.floor((pPos.x + (pMove.x > 0 ? TILE_SIZE/2 : (pMove.x < 0 ? -TILE_SIZE/2 : 0)) +TILE_SIZE/2)/TILE_SIZE);
-		}
-	}
-
 	pPos = pPos.add(pMove);
-
+	pPos.x = Math.floor(pPos.x);
+	pPos.y = Math.floor(pPos.y);
 	
 	render();
+}
+
+function pointInTile(p) {
+	let mapx = Math.floor(p.x / TILE_SIZE);
+	let mapy = Math.floor(p.y / TILE_SIZE);
+	return map[mapy*NUM_TILE_X+mapx];
+}
+
+function getPresent(p) {
+	let mapx = Math.floor(p.x / TILE_SIZE);
+	let mapy = Math.floor(p.y / TILE_SIZE);
+	map[mapy*NUM_TILE_X+mapx] = 0;
+	num_present--;
+
+	if (num_present == 0) {
+		playSound(Asset.sounds['fanfare']);
+	}
+	else {
+		playSound(Asset.sounds['get']);
+	}
 }
 
 function render() {
 	context.clearRect(0, 0, canvas.width, canvas.height);
 
-	context.drawImage(Asset.images['back'], 0, 0);
 	context.drawImage(Asset.images['player'], pPos.x, pPos.y, TILE_SIZE, TILE_SIZE);
 
 	num_present = 0;
@@ -313,6 +363,7 @@ function render() {
 		}
 	}
 	document.getElementById("present_counter").innerHTML = "現在のプレゼントは" + num_present + "個";
+	document.getElementById("pPosBox").innerHTML = "(" + pPos.x+ ", " + pPos.y + ")";
 }
 
 function checkGamepadInput() {
