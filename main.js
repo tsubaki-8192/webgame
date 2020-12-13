@@ -11,16 +11,42 @@ class Vec2 {
 	}
 
 	add(v) {
-		return new Vec2(this.x+v.x, this.y+v.y);
+		this.x += v.x;
+		this.y += v.y;
+	}
+
+	addPt(x, y) {
+		this.x += x;
+		this.y += y;
 	}
 
 	multiply(a) {
-		return new Vec2(this.x*a, this.y*a);
+		this.x *= a;
+		this.y *= a;
 	}
 
 	dot(v) {
-		return new Vec2(this.x*v.x, this.y*v.y);
+		return (this.x*v.x + this.y*v.y);
 	}
+}
+
+
+function toLPos(v) {
+	let vec = new Vec2(v.x, v.y);
+	vec.multiply(100);
+	return vec;
+}
+
+function toWPos(v) {
+	let vec = new Vec2(v.x, v.y);
+	vec.multiply(0.01);
+	vec.x = Math.round(vec.x);
+	vec.y = Math.round(vec.y);
+	return vec;
+}
+
+function toVPos(v) {
+	return v;
 }
 
 const SCREEN_WIDTH = 640;
@@ -29,8 +55,12 @@ const TIMEBAR_WIDTH = 360;
 const TILE_SIZE = 32;
 const NUM_TILE_X = SCREEN_WIDTH / TILE_SIZE;
 const NUM_TILE_Y = SCREEN_HEIGHT / TILE_SIZE;
-const GRAVITY = 0.2;
-const JUMP_ACCEL = 8;
+const GRAVITY = 18;
+const JUMP_ACCEL = 720;
+const MOVE_MAX = 600;
+const WALK_MAX = 200;
+const DELTA_MOVE = 80;
+const INERTIA = 0.65;
 const TIMEMAX = 1000;
 const CLEAR_WAIT = 180;
 
@@ -43,8 +73,8 @@ let keys = {};
 
 let pPos = new Vec2(13*TILE_SIZE, 10*TILE_SIZE);
 let pMove = new Vec2(0, 0);
-let pAccel = new Vec2(0, 0);
-let pjumped = false;
+let pAccel = new Vec2(0, 0);			// 厳密には、加速度自体より、加速度分を加算している速度ベクトル。
+let pDir;
 let time;
 let phase;
 let num_present;
@@ -267,26 +297,34 @@ function update() {
 
 	pMove.x = pMove.y = 0;
 	if (keys["Left"] > 0) {
-		pMove.x -= 2;
+		pAccel.x -= DELTA_MOVE;		
+		pDir = -1;
 	}
-	if (keys["Right"] > 0) {
-		pMove.x += 2;
+	else if (keys["Right"] > 0) {
+		pAccel.x += DELTA_MOVE;
+		pDir = 1;
 	}
-	if (keys["Jump"] == 1 && !pjumped) {
-		pAccel.y = -JUMP_ACCEL;
-		pjumped = true;
+	else {
+		pAccel.x *= INERTIA;
 	}
+	if (keys["Jump"] == 1) {
+		let wp = toWPos(pPos);
+		wp.addPt(0, TILE_SIZE);
+		let jumpable = (pointInTile(wp) == 1);
+		wp.addPt(TILE_SIZE-1, 0);
+		jumpable = jumpable || (pointInTile(wp) == 1);
+		if (jumpable) {
+			pAccel.y = -JUMP_ACCEL;
+		}
+	}
+	if (Math.abs(pAccel.x) > WALK_MAX) pAccel.x = WALK_MAX*Math.sign(pAccel.x);
 	pAccel.y += GRAVITY;
-	pMove = pMove.add(pAccel);
+	pMove.add(pAccel);
 	
-	if (Math.abs(pMove.x) > 5) { pMove.x = 5*Math.sign(pMove.x); }
-	if (Math.abs(pMove.y) > 5) { pMove.y = 5*Math.sign(pMove.y); }
+	if (Math.abs(pMove.y) > MOVE_MAX) { pMove.y = MOVE_MAX*Math.sign(pMove.y); }
 
-
-	checkCollision();
-	pPos = pPos.add(pMove);
-	pPos.x = Math.floor(pPos.x);
-	pPos.y = Math.floor(pPos.y);
+	pMove = toLPos(checkTileCollision(toWPos(pPos), toWPos(pMove)));
+	pPos.add(pMove);
 	
 	render();
 }
@@ -295,7 +333,15 @@ function update() {
 function render() {
 	context.clearRect(0, 0, canvas.width, canvas.height);
 
-	context.drawImage(Asset.images['player'], pPos.x, pPos.y, TILE_SIZE, TILE_SIZE);
+	let p = toVPos(toWPos(pPos));
+	if (pDir > 0) {
+		context.scale(-1,1);
+		context.drawImage(Asset.images['player'], -(p.x+TILE_SIZE), p.y, TILE_SIZE, TILE_SIZE);
+		context.scale(-1,1);
+	}
+	else {
+		context.drawImage(Asset.images['player'], p.x, p.y, TILE_SIZE, TILE_SIZE);
+	}
 
 	num_present = 0;
 	for (let y=0; y<NUM_TILE_Y; y++) {
@@ -323,7 +369,7 @@ function render() {
 	}
 
 	document.getElementById("present_counter").innerHTML = "現在のプレゼントは" + num_present + "個";
-	document.getElementById("pPosBox").innerHTML = "(" + pPos.x+ ", " + pPos.y + "), time =" + time;
+	document.getElementById("pPosBox").innerHTML = "(" + pAccel.x+ ", " + pAccel.y + "), time =" + time;
 }
 
 function checkGamepadInput() {
@@ -361,18 +407,19 @@ function getPresent(p) {
 function stageInit() {
 	pPos.x = 5*TILE_SIZE;
 	pPos.y = 13*TILE_SIZE;
+	pPos = toLPos(pPos);
 	time = 0;
 	phase = 0;
 	map = map_ref.slice();
 }
 
-function checkCollision() {
+function checkTileCollision(pos, mov) {
 	let check = 0, count = 0;
 	let point = new Vec2(0, 0);
 
 	for (let i = 0; i < 4; i++) {
-		point.x = pPos.x + pMove.x + (i%2==1?TILE_SIZE-1:0);
-		point.y = pPos.y + pMove.y + (i>=2?TILE_SIZE-1:0);
+		point.x = pos.x + mov.x + (i%2==1?TILE_SIZE-1:0);
+		point.y = pos.y + mov.y + (i>=2?TILE_SIZE-1:0);
 		switch(pointInTile(point)) {
 			case 1:
 				check |= (0x1<<i);
@@ -386,28 +433,26 @@ function checkCollision() {
 
 	if (count >= 2) {
 		if ((check & 0x3) == 0x3) { // (0x1 | 0x2)
-			pMove.y = Math.floor((pPos.y+pMove.y) / TILE_SIZE + 1)*TILE_SIZE - pPos.y;
+			mov.y = Math.floor((pos.y+mov.y) / TILE_SIZE + 1)*TILE_SIZE - pos.y;
 			if (pAccel.y < 0) pAccel.y = 0.5;
 		}
 		if ((check & 0xC) == 0xC) { // (0x4 | 0x8)
-			pMove.y = Math.floor((pPos.y+pMove.y) / TILE_SIZE)*TILE_SIZE - pPos.y;
-			pjumped = false;
+			mov.y = Math.floor((pos.y+mov.y) / TILE_SIZE)*TILE_SIZE - pos.y;
 			if (pAccel.y > 0) pAccel.y = 0;
 		}
 		if ((check & 0x5) == 0x5) { // (0x1 | 0x4)
-			pMove.x = Math.floor((pPos.x+pMove.x) / TILE_SIZE + 1)*TILE_SIZE - pPos.x;
+			mov.x = Math.floor((pos.x+mov.x) / TILE_SIZE + 1)*TILE_SIZE - pos.x;
 		}
 		if ((check & 0xA) == 0xA) { // (0x2 | 0x8)
-			pMove.x = Math.floor((pPos.x+pMove.x) / TILE_SIZE)*TILE_SIZE - pPos.x;
+			mov.x = Math.floor((pos.x+mov.x) / TILE_SIZE)*TILE_SIZE - pos.x;
 		}
 	}
 	else if (count == 1) {
-		point.x = pPos.x + ((check&0xA) != 0?(TILE_SIZE-1):0);
-		point.y = pPos.y + pMove.y + ((check&0xC) != 0?(TILE_SIZE-1):0);
+		point.x = pos.x + ((check&0xA) != 0?(TILE_SIZE-1):0);
+		point.y = pos.y + mov.y + ((check&0xC) != 0?(TILE_SIZE-1):0);
 		if (pointInTile(point)==1) {
-			pMove.y = Math.floor((pPos.y+pMove.y) / TILE_SIZE + ((check&0x3) != 0?1:0))*TILE_SIZE - pPos.y;
+			mov.y = Math.floor((pos.y+mov.y) / TILE_SIZE + ((check&0x3) != 0?1:0))*TILE_SIZE - pos.y;
 			if ((check&0x3) == 0) { 	
-				pjumped = false; 
 				if (pAccel.y > 0) pAccel.y = 0;
 			}
 			else {
@@ -415,7 +460,9 @@ function checkCollision() {
 			}
 		}
 		else {
-				pMove.x = Math.floor((pPos.x+pMove.x) / TILE_SIZE + ((check&0x5) != 0?1:0))*TILE_SIZE - pPos.x;
+				mov.x = Math.floor((pos.x+mov.x) / TILE_SIZE + ((check&0x5) != 0?1:0))*TILE_SIZE - pos.x;
 		}
 	}
+
+	return mov;
 }
